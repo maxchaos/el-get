@@ -41,7 +41,7 @@ ALIST-ELEM should be an element from `package-alist' or
 
   (defun el-get-elpa-delete-package (pkg)
     "A wrapper for `package-delete', deletes all versions."
-    (let ((descs (cdr (assq pkg package-alist))))
+    (let ((descs (el-get-elpa-package-id pkg)))
       (if (listp descs)
           ;; 24.4+ case, we have a list of descriptors that we can
           ;; call `package-delete' on.
@@ -51,6 +51,11 @@ ALIST-ELEM should be an element from `package-alist' or
 
   (defun el-get-elpa-package-id (pkg)
     "A compat utility function."
+    ;; If the package name passed to this function is a string
+    ;; (e.g., when the package was selected using `completing-read')
+    ;; first convert it to a valid `package-archive-contents' key.
+    (or (symbolp pkg)
+        (setq pkg (and (stringp pkg) (intern pkg))))
     ;; In 24.4+ we have a list of descs, earlier versions just use the
     ;; name (a symbol) to specify the package.
     (let* ((descs (cdr (assq pkg package-archive-contents))))
@@ -70,7 +75,12 @@ Installs the 1st available version. If HAVE-DEPS-P skip
 package.el's dependency computations."
     (let ((to-install (el-get-elpa-package-id pkg)))
       (if have-deps-p
-          (package-download-transaction (list to-install))
+          (progn
+            (package-download-transaction (list to-install))
+            ;; Since Emacs 25.1,
+            ;; package.el tracks user-selected packages using a variable
+            ;; which is not updated by `package-download-transaction'...
+            (package--update-selected-packages (list to-install) nil))
         (package-install to-install)))))
 
 (defcustom el-get-elpa-install-hook nil
@@ -230,7 +240,8 @@ first time.")
    (when (eq el-get-elpa-do-refresh 'once)
      (setq el-get-elpa-do-refresh nil)))
   (when (el-get-elpa-update-available-p package)
-    (el-get-elpa-remove package url nil)
+    ;; Remove both link and target directories.
+    (el-get-elpa-remove package url 'el-get-elpa-post-remove)
     (el-get-elpa-install-package
      (el-get-as-symbol package)
      (plist-member (el-get-package-def package) :depends))
